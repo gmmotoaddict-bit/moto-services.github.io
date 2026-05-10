@@ -131,6 +131,7 @@ textarea.form-control{resize:vertical;min-height:80px;}
     <a href="jobs.html">🔧 Job Log</a>
     <a href="sa-report.html" class="active">📈 SA Report</a>
     <a href="parts.html">📦 Parts</a>
+    <a href="capacity.html">👷 Capacity</a>
   </div>
 </nav>
 
@@ -256,6 +257,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     sel.innerHTML = sheetNames.length > 0
       ? sheetNames.map(n => `<option value="${n}">${n}</option>`).join('')
       : '<option value="">ไม่พบ Sheet</option>';
+    // เลือก sheet ล่าสุดอัตโนมัติ
+    if (sheetNames.length > 0) sel.value = sheetNames[sheetNames.length - 1];
   } else {
     document.getElementById('sheet-select').innerHTML = '<option value="">โหลดไม่ได้</option>';
   }

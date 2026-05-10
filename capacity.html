@@ -131,6 +131,7 @@ textarea.form-control{resize:vertical;min-height:80px;}
     <a href="jobs.html">🔧 Job Log</a>
     <a href="sa-report.html">📈 SA Report</a>
     <a href="parts.html">📦 Parts</a>
+    <a href="capacity.html" class="active">👷 Capacity</a>
   </div>
 </nav>
 
@@ -184,17 +185,25 @@ textarea.form-control{resize:vertical;min-height:80px;}
           <input class="form-control" id="cs-name" placeholder="ชื่อ-นามสกุล" required>
         </div>
         <div class="form-group">
-          <label class="form-label">ตำแหน่ง</label>
-          <select class="form-control" id="cs-role">
-            <option value="tech">ช่าง (Technician)</option>
-            <option value="chief_tech">หัวหน้าช่าง</option>
-            <option value="sa">Service Advisor (SA)</option>
+          <label class="form-label">สาขา *</label>
+          <select class="form-control" id="cs-branch">
+            <option value="หาดใหญ่">หาดใหญ่</option>
+            <option value="สุราษ">สุราษ</option>
+            <option value="ภูเก็ต">ภูเก็ต</option>
           </select>
         </div>
       </div>
       <div class="form-group">
+        <label class="form-label">ตำแหน่ง</label>
+        <select class="form-control" id="cs-role">
+          <option value="tech">ช่าง (Technician)</option>
+          <option value="chief_tech">หัวหน้าช่าง</option>
+          <option value="sa">Service Advisor (SA)</option>
+        </select>
+      </div>
+      <div class="form-group">
         <label class="form-label">หมายเหตุ (เช่น ลา, มาสาย, อยู่สาขาอื่น)</label>
-        <input class="form-control" id="cs-notes" placeholder="ว่างได้">
+        <input class="form-control" id="cs-notes" placeholder="ว่างได้ — ไม่บังคับ">
       </div>
       <div class="form-check" style="margin-bottom:12px;">
         <input type="checkbox" id="cs-available" checked>
@@ -358,17 +367,18 @@ function renderCapacityTable() {
       <td>${c.ot_available == true ? badge('⏰ ทำ OT ได้', 'blue') : '—'}</td>
       <td style="font-size:0.82rem; color:var(--muted);">${c.notes || '—'}</td>
       <td>
-        <button class="btn btn-outline btn-sm" onclick="editStaff('${c.name}', '${c.role}', '${c.branch}', ${c.is_available}, ${c.ot_available}, '${c.notes || ''}')">แก้ไข</button>
+        <button class="btn btn-outline btn-sm" onclick="editStaff('${c.name}','${c.role}','${c.branch}',${(c.is_available===true||String(c.is_available).toUpperCase()==='TRUE')?1:0},${(c.ot_available===true||String(c.ot_available).toUpperCase()==='TRUE')?1:0},'${(c.notes||'').replace(/'/g,'\&apos;')}')">แก้ไข</button>
       </td>
     </tr>`).join('')}</tbody></table>`;
 }
 
 function editStaff(name, role, branch, isAvail, isOT, notes) {
-  document.getElementById('cs-name').value = name;
-  document.getElementById('cs-role').value = role;
-  document.getElementById('cs-available').checked = (isAvail == true || isAvail === 'true');
-  document.getElementById('cs-ot').checked = (isOT == true || isOT === 'true');
-  document.getElementById('cs-notes').value = notes || '';
+  document.getElementById('cs-name').value     = name;
+  document.getElementById('cs-role').value     = role;
+  document.getElementById('cs-branch').value   = branch || 'หาดใหญ่';
+  document.getElementById('cs-available').checked = !!isAvail;
+  document.getElementById('cs-ot').checked     = !!isOT;
+  document.getElementById('cs-notes').value    = notes || '';
   openModal('modal-add-staff');
 }
 
@@ -376,7 +386,7 @@ async function submitCapacity() {
   const name = document.getElementById('cs-name').value.trim();
   if (!name) { showToast('กรุณาใส่ชื่อพนักงาน', 'error'); return; }
   const res = await Api.post('updateCapacity', {
-    branch:       document.getElementById('cap-branch-filter').value || 'หาดใหญ่',
+    branch:       document.getElementById('cs-branch').value || 'หาดใหญ่',
     role:         document.getElementById('cs-role').value,
     name,
     is_available: document.getElementById('cs-available').checked,

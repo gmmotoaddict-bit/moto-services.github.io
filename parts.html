@@ -131,6 +131,7 @@ textarea.form-control{resize:vertical;min-height:80px;}
     <a href="jobs.html">🔧 Job Log</a>
     <a href="sa-report.html">📈 SA Report</a>
     <a href="parts.html" class="active">📦 Parts</a>
+    <a href="capacity.html">👷 Capacity</a>
   </div>
 </nav>
 
@@ -313,10 +314,14 @@ async function loadParts() {
   renderAlertTable();
 }
 
-// Alert = parts received (receiveDate filled) but status doesn't say "done"
+// Alert = parts received (receiveDate filled) but status not marked as done
+// ใช้ positive keywords แทน negative regex — robust กว่าถ้าสะกดผิดนิดหน่อย
+const DONE_KEYWORDS = ['ส่ง', 'เสร็จ', 'ครบ', 'แจ้ง', 'จัดคิว', 'รับแล้ว', 'ยกเลิก'];
 function isArrivalAlert(r) {
   if (!r.receiveDate) return false;
-  return !/ส่งสำเร็จ|เสร็จสิ้น|จัดคิว|แจ้ง SA|ส่งมอบ|ครบแล้ว|รับแล้ว/i.test(r.status || '');
+  const st = (r.status || '').trim();
+  if (!st) return true; // มี receiveDate แต่ไม่มี status → ต้องดำเนินการ
+  return !DONE_KEYWORDS.some(k => st.includes(k));
 }
 
 function updateStats() {
@@ -346,10 +351,11 @@ function updateStats() {
 
 function getStatusColor(status) {
   if (!status) return 'gray';
-  if (/ส่งสำเร็จ|เสร็จสิ้น|ส่งมอบ|ครบแล้ว|รับแล้ว/i.test(status)) return 'green';
-  if (/จัดคิว|กำลัง|แจ้ง SA/i.test(status))                        return 'blue';
-  if (/รอ|รับเข้า/i.test(status))                                   return 'orange';
-  if (/ยกเลิก|ไม่มี/i.test(status))                                 return 'red';
+  const s = status.trim();
+  if (['ส่ง', 'เสร็จ', 'ครบ', 'รับแล้ว'].some(k => s.includes(k))) return 'green';
+  if (['จัดคิว', 'กำลัง', 'แจ้ง'].some(k => s.includes(k)))         return 'blue';
+  if (['รอ', 'รับเข้า', 'สั่ง'].some(k => s.includes(k)))           return 'orange';
+  if (['ยกเลิก', 'ไม่มี'].some(k => s.includes(k)))                 return 'red';
   return 'gray';
 }
 
