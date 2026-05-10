@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Staff Capacity — Moto Addict Service</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="navbar-brand">🏍️ <span>Moto</span>&nbsp;Addict</div>
+  <div class="nav-links">
+    <a href="dashboard.html">📊 Dashboard</a>
+    <a href="jobs.html">🔧 Job Log</a>
+    <a href="sa-report.html">📈 SA Report</a>
+    <a href="parts.html">📦 Parts</a>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">👷 ความพร้อมช่างวันนี้</div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-primary" onclick="openModal('modal-add-staff')">+ เพิ่มช่าง/SA</button>
+      <button class="btn btn-outline btn-sm" onclick="loadCapacity()">🔄 รีเฟรช</button>
+    </div>
+  </div>
+
+  <!-- Today's Date -->
+  <div class="alert alert-info">
+    <span class="alert-icon">📅</span>
+    <span>วันที่: <strong id="today-label"></strong> — ข้อมูลนี้ต้องอัปเดตทุกวัน</span>
+  </div>
+
+  <!-- Branch Summary -->
+  <div class="branch-grid" id="capacity-branch-grid" style="margin-bottom:1rem;">
+    <div class="loading"><div class="spinner"></div>กำลังโหลด...</div>
+  </div>
+
+  <!-- Full List -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">รายชื่อพนักงานทั้งหมดวันนี้</div>
+      <div class="filters" style="margin:0;">
+        <select class="filter-select" id="cap-branch-filter" onchange="renderCapacityTable()">
+          <option value="">— ทุกสาขา —</option>
+        </select>
+      </div>
+    </div>
+    <div class="table-wrap" id="capacity-table">
+      <div class="loading"><div class="spinner"></div>กำลังโหลด...</div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Modal: Add/Update Staff ─── -->
+<div class="modal-overlay" id="modal-add-staff">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">👷 บันทึกความพร้อมพนักงาน</div>
+      <button class="modal-close" onclick="closeModal('modal-add-staff')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">ชื่อพนักงาน *</label>
+          <input class="form-control" id="cs-name" placeholder="ชื่อ-นามสกุล" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">ตำแหน่ง</label>
+          <select class="form-control" id="cs-role">
+            <option value="tech">ช่าง (Technician)</option>
+            <option value="chief_tech">หัวหน้าช่าง</option>
+            <option value="sa">Service Advisor (SA)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">หมายเหตุ (เช่น ลา, มาสาย, อยู่สาขาอื่น)</label>
+        <input class="form-control" id="cs-notes" placeholder="ว่างได้">
+      </div>
+      <div class="form-check" style="margin-bottom:12px;">
+        <input type="checkbox" id="cs-available" checked>
+        <label for="cs-available" style="font-weight:600;">✅ พร้อมทำงานวันนี้</label>
+      </div>
+      <div class="form-check">
+        <input type="checkbox" id="cs-ot">
+        <label for="cs-ot" style="font-weight:600;">⏰ พร้อมทำ OT วันนี้</label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-add-staff')">ยกเลิก</button>
+      <button class="btn btn-primary" onclick="submitCapacity()">💾 บันทึก</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// ⚙️ CONFIG — แก้แค่บรรทัดนี้ให้ตรงกับ Apps Script ที่ Deploy แล้ว
+// ============================================================
+const APPS_SCRIPT_URL = 'YOUR_APPS_SCRIPT_URL_HERE';
+
+const BRANCHES      = ['หาดใหญ่', 'สุราษ', 'ภูเก็ต'];
+const STATUS_COLORS = {
+  'รอซ่อม':'yellow','กำลังซ่อม':'blue','รออะไหล่':'orange',
+  'รอลูกค้ารับ':'green','เสร็จสิ้น':'gray',
+};
+
+// ─── Apps Script API ──────────────────────────────────────────
+const Api = {
+  async get(action, params = {}) {
+    try {
+      const url = new URL(APPS_SCRIPT_URL);
+      url.searchParams.set('action', action);
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
+      });
+      return await (await fetch(url.toString(), { redirect: 'follow' })).json();
+    } catch (e) { return { ok: false, error: e.message }; }
+  },
+  async post(action, body = {}) {
+    try {
+      return await (await fetch(APPS_SCRIPT_URL, {
+        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action, ...body }), redirect: 'follow',
+      })).json();
+    } catch (e) { return { ok: false, error: e.message }; }
+  },
+};
+
+// ─── UI Helpers ───────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  let c = document.getElementById('_tc');
+  if (!c) { c = document.createElement('div'); c.id = '_tc'; c.className = 'toast-container'; document.body.appendChild(c); }
+  const t = document.createElement('div'); t.className = `toast toast-${type}`; t.textContent = msg;
+  c.appendChild(t); setTimeout(() => t.remove(), 3500);
+}
+function badge(text, color) { return `<span class="badge badge-${color || STATUS_COLORS[text] || 'gray'}">${text}</span>`; }
+function setLoading(el) { el.innerHTML = '<div class="loading"><div class="spinner"></div>กำลังโหลด...</div>'; }
+function setEmpty(el, msg = 'ไม่มีข้อมูล') { el.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">${msg}</div></div>`; }
+function fmtDate(val) { if (!val) return '—'; const d = new Date(val); return isNaN(d) ? val : d.toLocaleDateString('th-TH', { day:'2-digit', month:'short', year:'2-digit' }); }
+function fmtDT(val)   { if (!val) return '—'; const d = new Date(val); return isNaN(d) ? val : d.toLocaleString('th-TH',   { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }); }
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function initTabs(cId) {
+  const c = document.getElementById(cId); if (!c) return;
+  c.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
+    c.querySelectorAll('.tab-btn, .tab-pane').forEach(el => el.classList.remove('active'));
+    btn.classList.add('active');
+    const t = document.getElementById(btn.dataset.tab); if (t) t.classList.add('active');
+  }));
+}
+document.addEventListener('click', e => {
+  if (e.target.classList.contains('modal-overlay')) e.target.classList.remove('open');
+});
+let allCapacity = [];
+
+document.addEventListener('DOMContentLoaded', async () => {
+  // Set today label
+  const today = new Date();
+  document.getElementById('today-label').textContent =
+    today.toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+  // Branch filter
+  const sel = document.getElementById('cap-branch-filter');
+  BRANCHES.forEach(b => {
+    const opt = document.createElement('option'); opt.value = b; opt.textContent = b;
+    sel.appendChild(opt);
+  });
+
+  await loadCapacity();
+});
+
+async function loadCapacity() {
+  setLoading(document.getElementById('capacity-table'));
+  const res = await Api.get('getCapacity');
+  if (!res.ok) { showToast('โหลดข้อมูลไม่ได้', 'error'); return; }
+  allCapacity = res.data || [];
+  renderBranchSummary();
+  renderCapacityTable();
+}
+
+function renderBranchSummary() {
+  const grid  = document.getElementById('capacity-branch-grid');
+  const today = new Date().toISOString().split('T')[0];
+
+  const branches = BRANCHES;
+  grid.innerHTML = branches.map(branch => {
+    const todayCap = allCapacity.filter(c => c.branch === branch && c.date === today);
+    const avail    = todayCap.filter(c => c.is_available == true).length;
+    const ot       = todayCap.filter(c => c.ot_available == true).length;
+    const techs    = todayCap.filter(c => ['tech', 'chief_tech'].includes(c.role));
+    const techAvail= techs.filter(c => c.is_available == true).length;
+    return `<div class="branch-card">
+      <div class="branch-name">📍 ${branch}</div>
+      <div class="branch-stats">
+        <div class="branch-stat">
+          <div class="branch-stat-val ${avail === 0 ? 'red' : 'green'}">${avail}</div>
+          <div class="branch-stat-label">พร้อมทำงาน</div>
+        </div>
+        <div class="branch-stat">
+          <div class="branch-stat-val blue">${techAvail}</div>
+          <div class="branch-stat-label">ช่างพร้อม</div>
+        </div>
+        <div class="branch-stat">
+          <div class="branch-stat-val orange">${ot}</div>
+          <div class="branch-stat-label">พร้อม OT</div>
+        </div>
+        <div class="branch-stat">
+          <div class="branch-stat-val">${todayCap.length}</div>
+          <div class="branch-stat-label">ทั้งหมด</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderCapacityTable() {
+  const el     = document.getElementById('capacity-table');
+  const today  = new Date().toISOString().split('T')[0];
+  const branch = document.getElementById('cap-branch-filter').value;
+
+  let todayCap = allCapacity.filter(c => c.date === today);
+  if (branch) todayCap = todayCap.filter(c => c.branch === branch);
+  // (no role filter — all branches visible)
+
+  if (todayCap.length === 0) {
+    setEmpty(el, 'ยังไม่มีข้อมูลพนักงานวันนี้ กด "+ เพิ่มช่าง/SA" เพื่อเริ่มต้น');
+    return;
+  }
+
+  const roleLabels = { tech: '🔧 ช่าง', chief_tech: '⭐ หัวหน้าช่าง', sa: '📋 SA' };
+  el.innerHTML = `<table>
+    <thead><tr><th>สาขา</th><th>ชื่อ</th><th>ตำแหน่ง</th><th>พร้อมทำงาน</th><th>พร้อม OT</th><th>หมายเหตุ</th><th>Action</th></tr></thead>
+    <tbody>${todayCap.map(c => `<tr>
+      <td>${c.branch}</td>
+      <td><strong>${c.name}</strong></td>
+      <td>${roleLabels[c.role] || c.role}</td>
+      <td>${c.is_available == true ? badge('✅ พร้อม', 'green') : badge('❌ ไม่พร้อม', 'red')}</td>
+      <td>${c.ot_available == true ? badge('⏰ ทำ OT ได้', 'blue') : '—'}</td>
+      <td style="font-size:0.82rem; color:var(--muted);">${c.notes || '—'}</td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="editStaff('${c.name}', '${c.role}', '${c.branch}', ${c.is_available}, ${c.ot_available}, '${c.notes || ''}')">แก้ไข</button>
+      </td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+function editStaff(name, role, branch, isAvail, isOT, notes) {
+  document.getElementById('cs-name').value = name;
+  document.getElementById('cs-role').value = role;
+  document.getElementById('cs-available').checked = (isAvail == true || isAvail === 'true');
+  document.getElementById('cs-ot').checked = (isOT == true || isOT === 'true');
+  document.getElementById('cs-notes').value = notes || '';
+  openModal('modal-add-staff');
+}
+
+async function submitCapacity() {
+  const name = document.getElementById('cs-name').value.trim();
+  if (!name) { showToast('กรุณาใส่ชื่อพนักงาน', 'error'); return; }
+  const res = await Api.post('updateCapacity', {
+    branch:       document.getElementById('cap-branch-filter').value || 'หาดใหญ่',
+    role:         document.getElementById('cs-role').value,
+    name,
+    is_available: document.getElementById('cs-available').checked,
+    ot_available: document.getElementById('cs-ot').checked,
+    notes:        document.getElementById('cs-notes').value.trim(),
+  });
+  if (!res.ok) { showToast('ผิดพลาด: ' + res.error, 'error'); return; }
+  showToast('✅ บันทึกข้อมูลช่างแล้ว');
+  closeModal('modal-add-staff');
+  await loadCapacity();
+}
+</script>
+</body>
+</html>

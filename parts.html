@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Parts — Moto Addict Service</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="navbar-brand">🏍️ <span>Moto</span>&nbsp;Addict</div>
+  <div class="nav-links">
+    <a href="dashboard.html">📊 Dashboard</a>
+    <a href="jobs.html">🔧 Job Log</a>
+    <a href="sa-report.html">📈 SA Report</a>
+    <a href="parts.html" class="active">📦 Parts</a>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">📦 ติดตามอะไหล่ (Parts Tracking)</div>
+    <button class="btn btn-outline btn-sm" onclick="loadParts()">🔄 รีเฟรช</button>
+  </div>
+
+  <!-- Alert Zone -->
+  <div id="parts-alert-zone"></div>
+
+  <!-- Summary Stats -->
+  <div class="stat-cards" style="margin-bottom:1rem;">
+    <div class="stat-card blue">
+      <div class="stat-value" id="ps-total">—</div>
+      <div class="stat-label">รายการทั้งหมด</div>
+    </div>
+    <div class="stat-card green">
+      <div class="stat-value" id="ps-received">—</div>
+      <div class="stat-label">รับเข้าแล้ว</div>
+    </div>
+    <div class="stat-card red">
+      <div class="stat-value" id="ps-pending">—</div>
+      <div class="stat-label">รอดำเนินการ</div>
+    </div>
+    <div class="stat-card orange">
+      <div class="stat-value" id="ps-value">—</div>
+      <div class="stat-label">มูลค่ารับเข้ารวม</div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div id="tabs-parts">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="tab-all">📋 รายการทั้งหมด</button>
+      <button class="tab-btn" data-tab="tab-alert">
+        🚨 รอดำเนินการ
+        <span id="alert-badge" class="badge badge-red" style="display:none;margin-left:4px;"></span>
+      </button>
+    </div>
+
+    <!-- Tab 1: All Records -->
+    <div class="tab-pane active" id="tab-all">
+      <div class="filters">
+        <select class="filter-select" id="fp-brand" onchange="renderPartsTable()">
+          <option value="">— Brand ทั้งหมด —</option>
+        </select>
+        <select class="filter-select" id="fp-receiver" onchange="renderPartsTable()">
+          <option value="">— ผู้รับเรื่อง ทั้งหมด —</option>
+        </select>
+        <select class="filter-select" id="fp-status" onchange="renderPartsTable()">
+          <option value="">— สถานะทั้งหมด —</option>
+        </select>
+        <input class="filter-input" id="fp-search" placeholder="ค้นหาชื่อลูกค้า / เลขเอกสาร..." oninput="renderPartsTable()">
+      </div>
+      <div class="card" style="padding:0;">
+        <div class="table-wrap" id="table-all">
+          <div class="loading"><div class="spinner"></div>กำลังโหลด...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 2: Alert - Arrived but pending -->
+    <div class="tab-pane" id="tab-alert">
+      <div class="alert alert-danger">
+        <span class="alert-icon">🚨</span>
+        <span>รายการด้านล่างนี้ <strong>อะไหล่รับเข้าแล้ว แต่ยังไม่ได้แจ้งลูกค้า / ยังไม่จัดคิวซ่อม</strong> — กรุณาดำเนินการด่วน</span>
+      </div>
+      <div class="card" style="padding:0;">
+        <div class="table-wrap" id="table-alert">
+          <div class="loading"><div class="spinner"></div>กำลังโหลด...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// ⚙️ CONFIG — แก้แค่บรรทัดนี้ให้ตรงกับ Apps Script ที่ Deploy แล้ว
+// ============================================================
+const APPS_SCRIPT_URL = 'YOUR_APPS_SCRIPT_URL_HERE';
+
+const BRANCHES      = ['หาดใหญ่', 'สุราษ', 'ภูเก็ต'];
+const STATUS_COLORS = {
+  'รอซ่อม':'yellow','กำลังซ่อม':'blue','รออะไหล่':'orange',
+  'รอลูกค้ารับ':'green','เสร็จสิ้น':'gray',
+};
+
+// ─── Apps Script API ──────────────────────────────────────────
+const Api = {
+  async get(action, params = {}) {
+    try {
+      const url = new URL(APPS_SCRIPT_URL);
+      url.searchParams.set('action', action);
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
+      });
+      return await (await fetch(url.toString(), { redirect: 'follow' })).json();
+    } catch (e) { return { ok: false, error: e.message }; }
+  },
+  async post(action, body = {}) {
+    try {
+      return await (await fetch(APPS_SCRIPT_URL, {
+        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action, ...body }), redirect: 'follow',
+      })).json();
+    } catch (e) { return { ok: false, error: e.message }; }
+  },
+};
+
+// ─── UI Helpers ───────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  let c = document.getElementById('_tc');
+  if (!c) { c = document.createElement('div'); c.id = '_tc'; c.className = 'toast-container'; document.body.appendChild(c); }
+  const t = document.createElement('div'); t.className = `toast toast-${type}`; t.textContent = msg;
+  c.appendChild(t); setTimeout(() => t.remove(), 3500);
+}
+function badge(text, color) { return `<span class="badge badge-${color || STATUS_COLORS[text] || 'gray'}">${text}</span>`; }
+function setLoading(el) { el.innerHTML = '<div class="loading"><div class="spinner"></div>กำลังโหลด...</div>'; }
+function setEmpty(el, msg = 'ไม่มีข้อมูล') { el.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">${msg}</div></div>`; }
+function fmtDate(val) { if (!val) return '—'; const d = new Date(val); return isNaN(d) ? val : d.toLocaleDateString('th-TH', { day:'2-digit', month:'short', year:'2-digit' }); }
+function fmtDT(val)   { if (!val) return '—'; const d = new Date(val); return isNaN(d) ? val : d.toLocaleString('th-TH',   { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }); }
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function initTabs(cId) {
+  const c = document.getElementById(cId); if (!c) return;
+  c.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
+    c.querySelectorAll('.tab-btn, .tab-pane').forEach(el => el.classList.remove('active'));
+    btn.classList.add('active');
+    const t = document.getElementById(btn.dataset.tab); if (t) t.classList.add('active');
+  }));
+}
+document.addEventListener('click', e => {
+  if (e.target.classList.contains('modal-overlay')) e.target.classList.remove('open');
+});
+let allParts = [];
+
+document.addEventListener('DOMContentLoaded', async () => {
+  initTabs('tabs-parts');
+  await loadParts();
+});
+
+async function loadParts() {
+  setLoading(document.getElementById('table-all'));
+  setLoading(document.getElementById('table-alert'));
+
+  const res = await Api.get('getPartsTracking');
+  if (!res.ok) {
+    const errHtml = `<div class="alert alert-danger" style="margin:1rem;">
+      โหลดข้อมูลไม่ได้: ${res.error}<br>
+      <small style="color:var(--muted)">ตรวจสอบ Apps Script URL ใน config.js และ Deploy Web App แล้ว</small>
+    </div>`;
+    document.getElementById('table-all').innerHTML   = errHtml;
+    document.getElementById('table-alert').innerHTML = '';
+    return;
+  }
+  allParts = res.data || [];
+
+  // Populate filter dropdowns from actual data
+  const brands    = [...new Set(allParts.map(r => r.brand).filter(Boolean))].sort();
+  const receivers = [...new Set(allParts.map(r => r.receiver).filter(Boolean))].sort();
+  const statuses  = [...new Set(allParts.map(r => r.status).filter(Boolean))].sort();
+
+  document.getElementById('fp-brand').innerHTML =
+    '<option value="">— Brand ทั้งหมด —</option>' +
+    brands.map(b => `<option value="${b}">${b}</option>`).join('');
+
+  document.getElementById('fp-receiver').innerHTML =
+    '<option value="">— ผู้รับเรื่อง ทั้งหมด —</option>' +
+    receivers.map(r => `<option value="${r}">${r}</option>`).join('');
+
+  document.getElementById('fp-status').innerHTML =
+    '<option value="">— สถานะทั้งหมด —</option>' +
+    statuses.map(s => `<option value="${s}">${s}</option>`).join('');
+
+  updateStats();
+  renderPartsTable();
+  renderAlertTable();
+}
+
+// Alert = parts received (receiveDate filled) but status doesn't say "done"
+function isArrivalAlert(r) {
+  if (!r.receiveDate) return false;
+  return !/ส่งสำเร็จ|เสร็จสิ้น|จัดคิว|แจ้ง SA|ส่งมอบ|ครบแล้ว|รับแล้ว/i.test(r.status || '');
+}
+
+function updateStats() {
+  const received = allParts.filter(r => r.receiveDate);
+  const pending  = allParts.filter(r => isArrivalAlert(r));
+  const totalVal = allParts.reduce((s, r) => s + (r.receiveValue || 0), 0);
+  const fmt = n => Number(n || 0).toLocaleString('th-TH', { maximumFractionDigits: 0 });
+
+  document.getElementById('ps-total').textContent    = allParts.length;
+  document.getElementById('ps-received').textContent = received.length;
+  document.getElementById('ps-pending').textContent  = pending.length;
+  document.getElementById('ps-value').textContent    = fmt(totalVal);
+
+  const alertBadge = document.getElementById('alert-badge');
+  alertBadge.textContent   = pending.length;
+  alertBadge.style.display = pending.length > 0 ? 'inline-block' : 'none';
+
+  const zone = document.getElementById('parts-alert-zone');
+  zone.innerHTML = pending.length > 0
+    ? `<div class="alert alert-danger">
+        <span class="alert-icon">🚨</span>
+        <span>มีอะไหล่ <strong>${pending.length} รายการ</strong> รับเข้าแล้วแต่ยังรอดำเนินการ
+          — ดูที่แท็บ <strong>"รอดำเนินการ"</strong></span>
+       </div>`
+    : '';
+}
+
+function getStatusColor(status) {
+  if (!status) return 'gray';
+  if (/ส่งสำเร็จ|เสร็จสิ้น|ส่งมอบ|ครบแล้ว|รับแล้ว/i.test(status)) return 'green';
+  if (/จัดคิว|กำลัง|แจ้ง SA/i.test(status))                        return 'blue';
+  if (/รอ|รับเข้า/i.test(status))                                   return 'orange';
+  if (/ยกเลิก|ไม่มี/i.test(status))                                 return 'red';
+  return 'gray';
+}
+
+function renderPartsTable() {
+  const el       = document.getElementById('table-all');
+  const brand    = document.getElementById('fp-brand').value;
+  const receiver = document.getElementById('fp-receiver').value;
+  const status   = document.getElementById('fp-status').value;
+  const search   = document.getElementById('fp-search').value.toLowerCase();
+
+  const items = allParts.filter(r => {
+    if (brand    && r.brand    !== brand)    return false;
+    if (receiver && r.receiver !== receiver) return false;
+    if (status   && r.status   !== status)   return false;
+    if (search && !`${r.customer} ${r.docNo} ${r.note} ${r.updateNote}`.toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  if (items.length === 0) { setEmpty(el, 'ไม่มีข้อมูลที่ตรงกับเงื่อนไข'); return; }
+
+  const fmt = n => Number(n || 0).toLocaleString('th-TH', { maximumFractionDigits: 0 });
+
+  el.innerHTML = `<table>
+    <thead><tr>
+      <th>ลำดับ</th>
+      <th>เลขที่เอกสาร</th>
+      <th>ชื่อลูกค้า</th>
+      <th>แบรนด์</th>
+      <th>ผู้รับเรื่อง</th>
+      <th>สถานะ</th>
+      <th>Parts / PO</th>
+      <th>วันที่รับเข้า</th>
+      <th style="text-align:right">มูลค่า</th>
+      <th>หมายเหตุ</th>
+    </tr></thead>
+    <tbody>${items.map(r => {
+      const alert    = isArrivalAlert(r);
+      const sc       = getStatusColor(r.status);
+      const partsInfo = [r.orderStatus, r.poNo ? `PO: ${r.poNo}` : '', r.soNo ? `SO: ${r.soNo}` : '']
+        .filter(Boolean).join('<br>');
+      return `<tr class="${alert ? 'row-alert' : ''}">
+        <td style="color:var(--muted);font-size:0.78rem">${r.no || ''}</td>
+        <td>
+          <code style="font-size:0.78rem">${r.docNo || '—'}</code>
+          ${r.depositDate ? `<br><small style="color:var(--muted)">มัดจำ: ${r.depositDate}</small>` : ''}
+        </td>
+        <td><strong>${r.customer || '—'}</strong></td>
+        <td>${r.brand ? `<span class="badge badge-blue">${r.brand}</span>` : '—'}</td>
+        <td><strong>${r.receiver || '—'}</strong></td>
+        <td>
+          ${r.status ? `<span class="badge badge-${sc}">${r.status}</span>` : '—'}
+          ${alert ? `<br><small style="color:var(--danger)">⚠️ รอดำเนินการ</small>` : ''}
+        </td>
+        <td style="font-size:0.78rem;line-height:1.6">${partsInfo || '—'}</td>
+        <td>
+          ${r.receiveDate
+            ? `<span style="color:var(--success)">✅ ${r.receiveDate}</span>
+               ${r.deliveryDays ? `<br><small style="color:var(--muted)">${r.deliveryDays} วัน</small>` : ''}`
+            : '—'}
+        </td>
+        <td style="text-align:right">${r.receiveValue ? fmt(r.receiveValue) : '—'}</td>
+        <td style="font-size:0.78rem;color:var(--muted);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+            title="${r.updateNote || r.note || ''}">${r.updateNote || r.note || '—'}</td>
+      </tr>`;
+    }).join('')}</tbody>
+    <tfoot style="background:var(--light);font-weight:700;">
+      <tr>
+        <td colspan="8">รวม ${items.length} รายการ</td>
+        <td style="text-align:right">${fmt(items.reduce((s, r) => s + (r.receiveValue || 0), 0))}</td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>`;
+}
+
+function renderAlertTable() {
+  const el    = document.getElementById('table-alert');
+  const items = allParts.filter(r => isArrivalAlert(r));
+
+  if (items.length === 0) {
+    setEmpty(el, '✅ ทุกรายการดำเนินการครบถ้วนแล้ว — ไม่มีค้างงาน');
+    return;
+  }
+
+  const fmt = n => Number(n || 0).toLocaleString('th-TH', { maximumFractionDigits: 0 });
+
+  el.innerHTML = `<table>
+    <thead><tr>
+      <th>เลขที่เอกสาร</th>
+      <th>ชื่อลูกค้า</th>
+      <th>แบรนด์</th>
+      <th>ผู้รับเรื่อง</th>
+      <th>วันที่รับเข้า</th>
+      <th>จำนวนวัน</th>
+      <th style="text-align:right">มูลค่า</th>
+      <th>สถานะปัจจุบัน</th>
+      <th>อัพเดต / หมายเหตุ</th>
+    </tr></thead>
+    <tbody>${items.map(r => {
+      const sc = getStatusColor(r.status);
+      return `<tr class="row-alert">
+        <td>
+          <code style="font-size:0.78rem">${r.docNo || '—'}</code>
+          ${r.receiptDocNo ? `<br><small style="color:var(--muted)">ใบรับ: ${r.receiptDocNo}</small>` : ''}
+        </td>
+        <td><strong>${r.customer || '—'}</strong></td>
+        <td>${r.brand ? `<span class="badge badge-blue">${r.brand}</span>` : '—'}</td>
+        <td><strong style="color:var(--primary)">${r.receiver || '—'}</strong></td>
+        <td><span style="color:var(--success)">✅ ${r.receiveDate}</span></td>
+        <td>${r.deliveryDays || '—'}</td>
+        <td style="text-align:right">${r.receiveValue ? fmt(r.receiveValue) : '—'}</td>
+        <td>${r.status ? `<span class="badge badge-${sc}">${r.status}</span>` : '—'}</td>
+        <td style="font-size:0.78rem;color:var(--muted)">${r.updateNote || r.note || '—'}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+</script>
+
+<style>
+/* เพิ่ม left-border บน row-alert เพื่อความชัดเจน */
+tbody tr.row-alert { border-left: 3px solid var(--danger); }
+</style>
+</body>
+</html>

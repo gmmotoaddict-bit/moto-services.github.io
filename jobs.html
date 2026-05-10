@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job Log — Moto Addict Service</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="navbar-brand">🏍️ <span>Moto</span>&nbsp;Addict</div>
+  <div class="nav-links">
+    <a href="dashboard.html">📊 Dashboard</a>
+    <a href="jobs.html" class="active">🔧 Job Log</a>
+    <a href="sa-report.html">📈 SA Report</a>
+    <a href="parts.html">📦 Parts</a>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">🔧 ตารางบันทึกการเปิด-ปิด JOB</div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-primary" onclick="openModal('modal-add-job')">+ เพิ่ม Job</button>
+      <button class="btn btn-outline btn-sm" onclick="loadJobs()">🔄 รีเฟรช</button>
+    </div>
+  </div>
+
+  <!-- Summary Strip -->
+  <div class="stat-cards" id="job-stats" style="margin-bottom:1rem;">
+    <div class="stat-card blue"><div class="stat-value" id="s-total">—</div><div class="stat-label">Job ทั้งหมด</div></div>
+    <div class="stat-card green"><div class="stat-value" id="s-labor">—</div><div class="stat-label">ค่าแรงรวม</div></div>
+    <div class="stat-card orange"><div class="stat-value" id="s-parts">—</div><div class="stat-label">อะไหล่รวม</div></div>
+    <div class="stat-card red"><div class="stat-value" id="s-revenue">—</div><div class="stat-label">ยอดรวม</div></div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filters">
+    <select class="filter-select" id="f-sheet" onchange="loadJobs()">
+      <option value="">— Sheet ทั้งหมด —</option>
+    </select>
+    <select class="filter-select" id="f-brand" onchange="applyFilter()">
+      <option value="">— Brand ทั้งหมด —</option>
+    </select>
+    <input class="filter-input" id="f-search" placeholder="ค้นหาชื่อ / JOB / Detail..." oninput="applyFilter()">
+  </div>
+
+  <!-- Table -->
+  <div class="card" style="padding:0;">
+    <div class="table-wrap" id="job-table">
+      <div class="loading"><div class="spinner"></div>กำลังโหลด...</div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Modal: Add Job ─── -->
+<div class="modal-overlay" id="modal-add-job">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">➕ เพิ่ม Job ใหม่</div>
+      <button class="modal-close" onclick="closeModal('modal-add-job')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">ชื่อลูกค้า *</label>
+          <input class="form-control" id="aj-name" placeholder="ชื่อ-นามสกุล" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">สาขา</label>
+          <select class="form-control" id="aj-branch">
+            <option value="หาดใหญ่">หาดใหญ่</option>
+            <option value="สุราษ">สุราษ</option>
+            <option value="ภูเก็ต">ภูเก็ต</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">เลขที่ JOB</label>
+          <input class="form-control" id="aj-jobno" placeholder="JN######/####">
+        </div>
+        <div class="form-group">
+          <label class="form-label">ประเภทงาน</label>
+          <input class="form-control" id="aj-type" placeholder="เช็คระยะ / ซ่อม / Claim">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Brand / รุ่นรถ</label>
+          <input class="form-control" id="aj-brand" placeholder="Ducati / RE / KTM">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Detail / รายละเอียดงาน</label>
+          <input class="form-control" id="aj-detail" placeholder="เช่น เช็คระยะ 10,000 กม.">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">ค่าอะไหล่ (บาท)</label>
+          <input class="form-control" id="aj-parts" type="number" min="0" value="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">ค่าแรง (บาท)</label>
+          <input class="form-control" id="aj-labor" type="number" min="0" value="0">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">หมายเหตุ</label>
+        <input class="form-control" id="aj-note" placeholder="หมายเหตุเพิ่มเติม">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-add-job')">ยกเลิก</button>
+      <button class="btn btn-primary" onclick="submitAddJob()">💾 บันทึก</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Modal: Edit Job ─── -->
+<div class="modal-overlay" id="modal-edit-job">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">✏️ แก้ไข Job</div>
+      <button class="modal-close" onclick="closeModal('modal-edit-job')">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="ej-jobno">
+      <div class="form-group">
+        <label class="form-label">ลูกค้า / JOB</label>
+        <div id="ej-info" style="font-weight:600;padding:8px;background:var(--light);border-radius:var(--radius);"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">ค่าอะไหล่ (บาท)</label>
+          <input class="form-control" id="ej-parts" type="number" min="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">ค่าแรง (บาท)</label>
+          <input class="form-control" id="ej-labor" type="number" min="0">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Detail</label>
+        <input class="form-control" id="ej-detail">
+      </div>
+      <div class="form-group">
+        <label class="form-label">หมายเหตุ</label>
+        <input class="form-control" id="ej-note">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-edit-job')">ยกเลิก</button>
+      <button class="btn btn-success" onclick="submitEditJob()">✅ บันทึก</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// ⚙️ CONFIG — แก้แค่บรรทัดนี้ให้ตรงกับ Apps Script ที่ Deploy แล้ว
+// ============================================================
+const APPS_SCRIPT_URL = 'YOUR_APPS_SCRIPT_URL_HERE';
+
+const BRANCHES      = ['หาดใหญ่', 'สุราษ', 'ภูเก็ต'];
+const STATUS_COLORS = {
+  'รอซ่อม':'yellow','กำลังซ่อม':'blue','รออะไหล่':'orange',
+  'รอลูกค้ารับ':'green','เสร็จสิ้น':'gray',
+};
+
+// ─── Apps Script API ──────────────────────────────────────────
+const Api = {
+  async get(action, params = {}) {
+    try {
+      const url = new URL(APPS_SCRIPT_URL);
+      url.searchParams.set('action', action);
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
+      });
+      return await (await fetch(url.toString(), { redirect: 'follow' })).json();
+    } catch (e) { return { ok: false, error: e.message }; }
+  },
+  async post(action, body = {}) {
+    try {
+      return await (await fetch(APPS_SCRIPT_URL, {
+        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action, ...body }), redirect: 'follow',
+      })).json();
+    } catch (e) { return { ok: false, error: e.message }; }
+  },
+};
+
+// ─── UI Helpers ───────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  let c = document.getElementById('_tc');
+  if (!c) { c = document.createElement('div'); c.id = '_tc'; c.className = 'toast-container'; document.body.appendChild(c); }
+  const t = document.createElement('div'); t.className = `toast toast-${type}`; t.textContent = msg;
+  c.appendChild(t); setTimeout(() => t.remove(), 3500);
+}
+function badge(text, color) { return `<span class="badge badge-${color || STATUS_COLORS[text] || 'gray'}">${text}</span>`; }
+function setLoading(el) { el.innerHTML = '<div class="loading"><div class="spinner"></div>กำลังโหลด...</div>'; }
+function setEmpty(el, msg = 'ไม่มีข้อมูล') { el.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">${msg}</div></div>`; }
+function fmtDate(val) { if (!val) return '—'; const d = new Date(val); return isNaN(d) ? val : d.toLocaleDateString('th-TH', { day:'2-digit', month:'short', year:'2-digit' }); }
+function fmtDT(val)   { if (!val) return '—'; const d = new Date(val); return isNaN(d) ? val : d.toLocaleString('th-TH',   { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }); }
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function initTabs(cId) {
+  const c = document.getElementById(cId); if (!c) return;
+  c.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
+    c.querySelectorAll('.tab-btn, .tab-pane').forEach(el => el.classList.remove('active'));
+    btn.classList.add('active');
+    const t = document.getElementById(btn.dataset.tab); if (t) t.classList.add('active');
+  }));
+}
+document.addEventListener('click', e => {
+  if (e.target.classList.contains('modal-overlay')) e.target.classList.remove('open');
+});
+let allJobs = [];
+
+document.addEventListener('DOMContentLoaded', async () => {
+  // โหลด sheet names จาก Apps Script
+  const sheetRes = await Api.get('getSheetNames', { ssId: 'jobLog' });
+  if (sheetRes.ok && sheetRes.data.length > 0) {
+    const sheetSel = document.getElementById('f-sheet');
+    const names    = sheetRes.data;
+    sheetSel.innerHTML = '<option value="">— Sheet ทั้งหมด —</option>' +
+      names.map(n => `<option value="${n}">${n}</option>`).join('');
+    // เลือก sheet ล่าสุด (ท้ายสุด = เดือนปัจจุบัน)
+    sheetSel.value = names[names.length - 1];
+  }
+  await loadJobs();
+});
+
+async function loadJobs() {
+  setLoading(document.getElementById('job-table'));
+  const sheetName = document.getElementById('f-sheet').value;
+
+  const res = await Api.get('getJobLog', { sheetName });
+  if (!res.ok) {
+    document.getElementById('job-table').innerHTML =
+      `<div class="alert alert-danger" style="margin:1rem;">โหลดไม่ได้: ${res.error}</div>`;
+    return;
+  }
+  allJobs = res.data || [];
+
+  // Populate brand filter
+  const brands = [...new Set(allJobs.map(j => j.brand))].filter(Boolean);
+  document.getElementById('f-brand').innerHTML =
+    '<option value="">— Brand ทั้งหมด —</option>' +
+    brands.map(b => `<option value="${b}">${b}</option>`).join('');
+
+  applyFilter();
+}
+
+function applyFilter() {
+  const sheet  = document.getElementById('f-sheet').value;
+  const brand  = document.getElementById('f-brand').value;
+  const search = document.getElementById('f-search').value.toLowerCase();
+
+  const filtered = allJobs.filter(j => {
+    if (sheet && j.sheet && j.sheet !== sheet) return false;
+    if (brand && j.brand !== brand) return false;
+    if (search) {
+      const hay = `${j.name} ${j.jobNo} ${j.detail} ${j.brand}`.toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
+    return true;
+  });
+
+  updateStats(filtered);
+  renderTable(filtered);
+}
+
+function updateStats(jobs) {
+  const fmt = n => {
+    const v = Number(n||0);
+    return v >= 1000 ? (v/1000).toFixed(1)+'K' : v.toFixed(0);
+  };
+  document.getElementById('s-total').textContent   = jobs.length;
+  document.getElementById('s-labor').textContent   = fmt(jobs.reduce((s,j)=>s+j.labor,0));
+  document.getElementById('s-parts').textContent   = fmt(jobs.reduce((s,j)=>s+j.parts,0));
+  document.getElementById('s-revenue').textContent = fmt(jobs.reduce((s,j)=>s+j.total,0));
+}
+
+function renderTable(jobs) {
+  const el = document.getElementById('job-table');
+  if (jobs.length === 0) { setEmpty(el, 'ไม่มีข้อมูล Job'); return; }
+  const fmt = n => Number(n||0).toLocaleString('th-TH', {maximumFractionDigits:0});
+  el.innerHTML = `<table>
+    <thead><tr>
+      <th>No.</th><th>เลขที่ JOB</th><th>ชื่อลูกค้า</th>
+      <th>Detail</th><th>Brand</th>
+      <th style="text-align:right">อะไหล่</th>
+      <th style="text-align:right">ค่าแรง</th>
+      <th style="text-align:right">รวม</th>
+      <th>สาขา/Sheet</th><th></th>
+    </tr></thead>
+    <tbody>${jobs.map((j,i) => `<tr>
+      <td style="color:var(--muted);font-size:0.8rem">${j.no || i+1}</td>
+      <td><code style="font-size:0.78rem">${j.jobNo || '—'}</code></td>
+      <td><strong>${j.name || '—'}</strong></td>
+      <td style="font-size:0.82rem;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${j.detail}">${j.detail || '—'}</td>
+      <td>${j.brand ? badge(j.brand,'blue') : '—'}</td>
+      <td style="text-align:right">${j.parts ? fmt(j.parts) : '—'}</td>
+      <td style="text-align:right">${j.labor ? fmt(j.labor) : '—'}</td>
+      <td style="text-align:right"><strong class="${j.total > 0 ? 'text-green' : ''}">${j.total ? fmt(j.total) : '—'}</strong></td>
+      <td style="font-size:0.8rem;color:var(--muted)">${j.branch || j.sheet || '—'}</td>
+      <td><button class="btn btn-outline btn-sm" onclick="openEdit(${i})">แก้ไข</button></td>
+    </tr>`).join('')}
+    </tbody>
+    <tfoot style="background:var(--light);font-weight:700;">
+      <tr>
+        <td colspan="5">รวม ${jobs.length} Job</td>
+        <td style="text-align:right">${fmt(jobs.reduce((s,j)=>s+j.parts,0))}</td>
+        <td style="text-align:right">${fmt(jobs.reduce((s,j)=>s+j.labor,0))}</td>
+        <td style="text-align:right">${fmt(jobs.reduce((s,j)=>s+j.total,0))}</td>
+        <td colspan="2"></td>
+      </tr>
+    </tfoot>
+  </table>`;
+}
+
+// ─── Add Job ──────────────────────────────────────────────────
+async function submitAddJob() {
+  const name = document.getElementById('aj-name').value.trim();
+  if (!name) { showToast('กรุณาใส่ชื่อลูกค้า', 'error'); return; }
+  const res = await Api.post('addJob', {
+    customer_name: name,
+    branch:   document.getElementById('aj-branch').value,
+    job_no:   document.getElementById('aj-jobno').value.trim(),
+    job_type: document.getElementById('aj-type').value.trim(),
+    brand:    document.getElementById('aj-brand').value.trim(),
+    detail:   document.getElementById('aj-detail').value.trim(),
+    parts:    parseFloat(document.getElementById('aj-parts').value) || 0,
+    labor:    parseFloat(document.getElementById('aj-labor').value) || 0,
+    note:     document.getElementById('aj-note').value.trim(),
+  });
+  if (!res.ok) { showToast('ผิดพลาด: ' + res.error, 'error'); return; }
+  showToast('✅ บันทึก Job เรียบร้อย');
+  closeModal('modal-add-job');
+  await loadJobs();
+}
+
+// ─── Edit Job ─────────────────────────────────────────────────
+let editingJobIndex = -1;
+function openEdit(idx) {
+  const j = allJobs[idx];
+  if (!j) return;
+  editingJobIndex = idx;
+  document.getElementById('ej-jobno').value  = j.jobNo;
+  document.getElementById('ej-info').textContent  = `${j.name} — ${j.jobNo}`;
+  document.getElementById('ej-parts').value  = j.parts || 0;
+  document.getElementById('ej-labor').value  = j.labor || 0;
+  document.getElementById('ej-detail').value = j.detail || '';
+  document.getElementById('ej-note').value   = j.note || '';
+  openModal('modal-edit-job');
+}
+
+async function submitEditJob() {
+  const jobNo = document.getElementById('ej-jobno').value;
+  if (!jobNo) { showToast('ไม่พบเลขที่ JOB', 'error'); return; }
+  const res = await Api.post('updateJob', {
+    job_no: jobNo,
+    parts:  parseFloat(document.getElementById('ej-parts').value) || 0,
+    labor:  parseFloat(document.getElementById('ej-labor').value) || 0,
+    detail: document.getElementById('ej-detail').value,
+    note:   document.getElementById('ej-note').value,
+  });
+  if (!res.ok) { showToast('ผิดพลาด: ' + res.error, 'error'); return; }
+  showToast('✅ แก้ไขเรียบร้อย');
+  closeModal('modal-edit-job');
+  await loadJobs();
+}
+</script>
+<style>
+.text-green { color: var(--success); }
+code { background: var(--light); padding: 2px 5px; border-radius: 4px; }
+</style>
+</body>
+</html>

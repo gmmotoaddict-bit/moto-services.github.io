@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — Moto Addict Service</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="navbar-brand">🏍️ <span>Moto</span>&nbsp;Addict</div>
+  <div class="nav-links">
+    <a href="dashboard.html" class="active">📊 Dashboard</a>
+    <a href="jobs.html">🔧 Job Log</a>
+    <a href="sa-report.html">📈 SA Report</a>
+    <a href="parts.html">📦 Parts</a>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <span id="last-update" style="font-size:0.78rem; color:rgba(255,255,255,0.6);"></span>
+    <button class="btn btn-outline btn-sm" style="color:white;border-color:rgba(255,255,255,0.3)" onclick="loadAll()">🔄</button>
+  </div>
+</nav>
+
+<div class="page">
+
+  <!-- ── ส่วนที่ 1: KPI จากตารางสรุปยอด (Sheet 1) ─────────── -->
+  <div class="page-header">
+    <div class="page-title">📊 สรุปยอด Aftersales รายสาขา</div>
+    <span id="period-label" style="font-size:0.85rem; color:var(--muted);"></span>
+  </div>
+
+  <div id="branch-kpi-grid" class="branch-grid">
+    <div class="loading"><div class="spinner"></div>กำลังโหลด...</div>
+  </div>
+
+  <!-- ── ส่วนที่ 2: SA Performance (Sheet 2) ──────────────── -->
+  <div class="card" style="margin-top:1.25rem;">
+    <div class="card-header">
+      <div class="card-title">📈 ผลงาน SA / ช่าง (ยอดสะสมเดือนนี้)</div>
+      <span id="sa-sheet-label" style="font-size:0.8rem; color:var(--muted);"></span>
+    </div>
+    <div class="table-wrap" id="sa-summary-table">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+  <!-- ── ส่วนที่ 3: Job Log ล่าสุด (Sheet 3) ──────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">🔧 Job ล่าสุด</div>
+      <a href="jobs.html" class="btn btn-outline btn-sm">ดูทั้งหมด →</a>
+    </div>
+    <div class="table-wrap" id="recent-jobs-table">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ============================================================
+// ⚙️ CONFIG — แก้แค่บรรทัดนี้ให้ตรงกับ Apps Script ที่ Deploy แล้ว
+// ============================================================
+const APPS_SCRIPT_URL = 'YOUR_APPS_SCRIPT_URL_HERE';
+
+const BRANCHES      = ['หาดใหญ่', 'สุราษ', 'ภูเก็ต'];
+const STATUS_COLORS = {
+  'รอซ่อม':'yellow','กำลังซ่อม':'blue','รออะไหล่':'orange',
+  'รอลูกค้ารับ':'green','เสร็จสิ้น':'gray',
+};
+
+// ─── Apps Script API ──────────────────────────────────────────
+const Api = {
+  async get(action, params = {}) {
+    try {
+      const url = new URL(APPS_SCRIPT_URL);
+      url.searchParams.set('action', action);
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
+      });
+      return await (await fetch(url.toString(), { redirect: 'follow' })).json();
+    } catch (e) { return { ok: false, error: e.message }; }
+  },
+  async post(action, body = {}) {
+    try {
+      return await (await fetch(APPS_SCRIPT_URL, {
+        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action, ...body }), redirect: 'follow',
+      })).json();
+    } catch (e) { return { ok: false, error: e.message }; }
+  },
+};
+
+// ─── UI Helpers ───────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  let c = document.getElementById('_tc');
+  if (!c) { c = document.createElement('div'); c.id = '_tc'; c.className = 'toast-container'; document.body.appendChild(c); }
+  const t = document.createElement('div'); t.className = `toast toast-${type}`; t.textContent = msg;
+  c.appendChild(t); setTimeout(() => t.remove(), 3500);
+}
+function badge(text, color) { return `<span class="badge badge-${color || STATUS_COLORS[text] || 'gray'}">${text}</span>`; }
+function setLoading(el) { el.innerHTML = '<div class="loading"><div class="spinner"></div>กำลังโหลด...</div>'; }
+function setEmpty(el, msg = 'ไม่มีข้อมูล') { el.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">${msg}</div></div>`; }
+function fmtDate(val) { if (!val) return '—'; const d = new Date(val); return isNaN(d) ? val : d.toLocaleDateString('th-TH', { day:'2-digit', month:'short', year:'2-digit' }); }
+function fmtDT(val)   { if (!val) return '—'; const d = new Date(val); return isNaN(d) ? val : d.toLocaleString('th-TH',   { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }); }
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function initTabs(cId) {
+  const c = document.getElementById(cId); if (!c) return;
+  c.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
+    c.querySelectorAll('.tab-btn, .tab-pane').forEach(el => el.classList.remove('active'));
+    btn.classList.add('active');
+    const t = document.getElementById(btn.dataset.tab); if (t) t.classList.add('active');
+  }));
+}
+document.addEventListener('click', e => {
+  if (e.target.classList.contains('modal-overlay')) e.target.classList.remove('open');
+});
+document.addEventListener('DOMContentLoaded', loadAll);
+
+async function loadAll() {
+  document.getElementById('last-update').textContent =
+    'อัปเดต: ' + new Date().toLocaleTimeString('th-TH');
+
+  // โหลดพร้อมกัน 3 แหล่งผ่าน Google Apps Script
+  const [manRes, saRes, jobRes] = await Promise.all([
+    Api.get('getManagerSummary'),
+    Api.get('getSAReport'),
+    Api.get('getJobLog'),
+  ]);
+
+  if (manRes.ok) {
+    renderBranchKPI(manRes.data);
+  } else {
+    document.getElementById('branch-kpi-grid').innerHTML =
+      `<div class="alert alert-danger">โหลด Manager Summary ไม่ได้: ${manRes.error}</div>`;
+  }
+
+  if (saRes.ok) {
+    renderSASummary(saRes.data);
+  } else {
+    document.getElementById('sa-summary-table').innerHTML =
+      `<div class="alert alert-danger">โหลด SA Report ไม่ได้: ${saRes.error}</div>`;
+  }
+
+  if (jobRes.ok) {
+    renderRecentJobs(jobRes.data);
+  } else {
+    document.getElementById('recent-jobs-table').innerHTML =
+      `<div class="alert alert-danger">โหลด Job Log ไม่ได้: ${jobRes.error}</div>`;
+  }
+}
+
+// ─── KPI Cards ต่อสาขา ────────────────────────────────────────
+function renderBranchKPI(branches) {
+  const grid = document.getElementById('branch-kpi-grid');
+  if (!branches || branches.length === 0) {
+    setEmpty(grid, 'ไม่มีข้อมูลสาขา'); return;
+  }
+
+  // ดึงชื่อเดือน/ปี จาก title (ถ้ามี)
+  grid.innerHTML = branches.map(b => {
+    const pct = b.percent || 0;
+    const barColor = pct >= 80 ? 'var(--success)' : pct >= 50 ? 'var(--yellow)' : 'var(--primary)';
+    const fmt = n => Number(n||0).toLocaleString('th-TH', {maximumFractionDigits:0});
+
+    // แยก staff ตาม type
+    const partsJobs = b.staff.filter(s => s.type === 'อะไหล่ JOB');
+    const retail    = b.staff.filter(s => s.type === 'ขายปลีก');
+    const labor     = b.staff.filter(s => !s.type || s.type === '' || s.type === 'ค่าแรง');
+
+    return `<div class="branch-card ${pct < 30 ? 'alert-branch' : ''}">
+      <div class="branch-name">📍 ${b.branch} <small style="color:var(--muted);font-weight:400;">(${b.code})</small></div>
+
+      <!-- Progress Bar -->
+      <div style="margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;font-size:0.8rem;margin-bottom:4px;">
+          <span>ทำได้ ${fmt(b.actual)} บาท</span>
+          <span style="font-weight:700;color:${barColor}">${pct.toFixed(1)}%</span>
+        </div>
+        <div style="background:var(--border);border-radius:4px;height:8px;overflow:hidden;">
+          <div style="width:${Math.min(pct,100)}%;background:${barColor};height:100%;border-radius:4px;transition:width 0.6s;"></div>
+        </div>
+        <div style="font-size:0.75rem;color:var(--muted);margin-top:3px;">เป้า: ${fmt(b.target)} บาท | Variance: ${b.variance < 0 ? '▼' : '▲'} ${fmt(Math.abs(b.variance))}</div>
+      </div>
+
+      <!-- Staff Summary -->
+      <div style="font-size:0.8rem;">
+        ${partsJobs.length > 0 ? `<div style="margin-bottom:4px;">
+          <strong>อะไหล่ JOB:</strong>
+          ${partsJobs.map(s => `<span style="margin-left:6px;">${s.name.split('(')[0].trim()} ${badge(fmt(s.actual), s.actual >= s.target*0.8 ? 'green' : 'red')}</span>`).join('')}
+        </div>` : ''}
+        ${retail.length > 0 ? `<div style="margin-bottom:4px;">
+          <strong>ขายปลีก:</strong>
+          ${retail.map(s => `<span style="margin-left:6px;">${s.name.split('(')[0].trim()} ${badge(fmt(s.actual), s.actual >= s.target*0.8 ? 'green' : 'red')}</span>`).join('')}
+        </div>` : ''}
+        ${labor.length > 0 ? `<div>
+          <strong>ค่าแรง:</strong>
+          ${labor.map(s => `<span style="margin-left:6px;">${s.name.split('(')[1]?.replace(')','') || s.name.split(' ')[0]} ${badge(fmt(s.actual), s.actual >= s.target*0.8 ? 'green' : 'red')}</span>`).join('')}
+        </div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ─── SA Summary Table ─────────────────────────────────────────
+function renderSASummary(saData) {
+  const el = document.getElementById('sa-summary-table');
+  document.getElementById('sa-sheet-label').textContent = saData.sheetName || '';
+
+  const rows = (saData.summary || []).filter(r => r.sa && r.brand !== 'Total Service Report');
+  if (rows.length === 0) { setEmpty(el, 'ไม่มีข้อมูล SA'); return; }
+
+  const fmt  = n => Number(n||0).toLocaleString('th-TH', {maximumFractionDigits:0});
+  const fmtK = n => {
+    const v = Number(n||0);
+    return v >= 1000 ? (v/1000).toFixed(1) + 'K' : v.toFixed(0);
+  };
+
+  el.innerHTML = `<table>
+    <thead><tr>
+      <th>Brand</th><th>SA / ช่าง</th>
+      <th>TP (คัน)</th><th>เปิด Job</th><th>ปิด Job</th>
+      <th>ค่าแรง</th><th>อะไหล่</th><th>ยาง/น้ำมัน</th><th>รวม</th>
+    </tr></thead>
+    <tbody>${rows.map(r => `<tr>
+      <td><strong>${r.brand}</strong></td>
+      <td>${r.sa}</td>
+      <td style="text-align:center">${r.tp}</td>
+      <td style="text-align:center">${r.jobsOpened}</td>
+      <td style="text-align:center">${r.jobsClosed}</td>
+      <td style="text-align:right">${fmtK(r.labor)}</td>
+      <td style="text-align:right">${fmtK(r.parts)}</td>
+      <td style="text-align:right">${fmtK(r.tires)}</td>
+      <td style="text-align:right"><strong>${fmtK(r.grandTotal)}</strong></td>
+    </tr>`).join('')}
+    </tbody>
+    <tfoot style="background:var(--secondary);color:white;">
+      <tr>
+        <td colspan="2"><strong>รวมทั้งสิ้น</strong></td>
+        <td style="text-align:center"><strong>${rows.reduce((s,r)=>s+r.tp,0)}</strong></td>
+        <td style="text-align:center"><strong>${rows.reduce((s,r)=>s+r.jobsOpened,0)}</strong></td>
+        <td style="text-align:center"><strong>${rows.reduce((s,r)=>s+r.jobsClosed,0)}</strong></td>
+        <td style="text-align:right"><strong>${fmt(rows.reduce((s,r)=>s+r.labor,0))}</strong></td>
+        <td style="text-align:right"><strong>${fmt(rows.reduce((s,r)=>s+r.parts,0))}</strong></td>
+        <td style="text-align:right"><strong>${fmt(rows.reduce((s,r)=>s+r.tires,0))}</strong></td>
+        <td style="text-align:right"><strong>${fmt(rows.reduce((s,r)=>s+r.grandTotal,0))}</strong></td>
+      </tr>
+    </tfoot>
+  </table>`;
+}
+
+// ─── Recent Jobs ──────────────────────────────────────────────
+function renderRecentJobs(jobs) {
+  const el = document.getElementById('recent-jobs-table');
+  const recent = [...jobs].reverse().slice(0, 15);
+  if (recent.length === 0) { setEmpty(el, 'ยังไม่มี Job'); return; }
+  const fmt = n => Number(n||0).toLocaleString('th-TH', {maximumFractionDigits:0});
+  el.innerHTML = `<table>
+    <thead><tr><th>เลขที่ JOB</th><th>ชื่อลูกค้า</th><th>Detail</th><th>Brand</th>
+      <th>อะไหล่</th><th>ค่าแรง</th><th>รวม</th><th>สาขา</th></tr></thead>
+    <tbody>${recent.map(j => `<tr>
+      <td><code style="font-size:0.8rem">${j.jobNo || '—'}</code></td>
+      <td><strong>${j.name || '—'}</strong></td>
+      <td style="font-size:0.82rem;color:var(--muted)">${j.detail || '—'}</td>
+      <td>${j.brand ? badge(j.brand, 'blue') : '—'}</td>
+      <td style="text-align:right">${j.parts ? fmt(j.parts) : '—'}</td>
+      <td style="text-align:right">${j.labor ? fmt(j.labor) : '—'}</td>
+      <td style="text-align:right"><strong>${j.total ? fmt(j.total) : '—'}</strong></td>
+      <td>${j.branch || j.sheet || '—'}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+</script>
+</body>
+</html>
